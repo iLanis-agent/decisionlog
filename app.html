@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DecisionLog - journal</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:#16121f; color:#efeaf7; min-height:100vh; }
+  .wrap { max-width:760px; margin:0 auto; padding:28px 20px 80px; }
+  header { display:flex; justify-content:space-between; align-items:center; margin-bottom:22px; }
+  header h1 { font-size:22px; } header h1 span { color:#a78bfa; }
+  header a { color:#9a8fb8; text-decoration:none; font-size:14px; }
+  .card { background:#1e1830; border:1px solid #352b52; border-radius:12px; padding:18px; margin-bottom:18px; }
+  label { font-size:12px; color:#9a8fb8; display:block; margin-bottom:4px; }
+  input, select, textarea { background:#16121f; border:1px solid #443a6b; border-radius:8px; color:#efeaf7; padding:9px 10px; font-size:14px; width:100%; font-family:inherit; }
+  textarea { resize:vertical; min-height:52px; }
+  button { background:#a78bfa; border:none; color:#17102a; font-weight:700; padding:10px 20px; border-radius:9px; font-size:14px; cursor:pointer; }
+  button.ghost { background:#2a2144; color:#c3b8e3; padding:7px 12px; font-size:13px; }
+  button:hover { filter:brightness(1.1); }
+  .row { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:12px; }
+  .dec { padding:12px 0; border-bottom:1px solid #2a2144; }
+  .dec:last-child { border-bottom:none; }
+  .dec .txt { font-size:15px; margin-bottom:3px; }
+  .dec .meta { color:#9a8fb8; font-size:12px; line-height:1.5; }
+  .dec .actions { margin-top:8px; display:flex; gap:8px; align-items:center; }
+  .conf { color:#a78bfa; font-weight:700; }
+  .stats { display:flex; gap:26px; flex-wrap:wrap; }
+  .stat b { font-size:24px; color:#fff; display:block; }
+  .stat span { font-size:12px; color:#9a8fb8; }
+  .brow { display:flex; align-items:center; gap:10px; padding:7px 0; border-bottom:1px solid #2a2144; font-size:13px; }
+  .brow:last-child { border-bottom:none; }
+  .brow .range { min-width:74px; color:#9a8fb8; }
+  .brow .barwrap { flex:1; height:14px; background:#16121f; border-radius:4px; position:relative; }
+  .brow .bar { position:absolute; top:0; left:0; height:14px; border-radius:4px; background:#5b4a8a; }
+  .brow .mark { position:absolute; top:-3px; width:3px; height:20px; background:#a78bfa; }
+  .brow .nums { min-width:130px; text-align:right; color:#c3b8e3; }
+  .err { color:#ff8a8a; font-size:13px; margin-top:8px; }
+  .empty { color:#9a8fb8; text-align:center; padding:22px 0; font-size:14px; }
+  h3 { font-size:15px; margin-bottom:10px; color:#c3b8e3; }
+  .tag-r { color:#7ee2a0; font-weight:700; } .tag-w { color:#ff8a8a; font-weight:700; }
+  a.rm { color:#e06b6b; font-size:12px; text-decoration:none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header><h1>Decision<span>Log</span></h1><a href="index.html">home</a></header>
+
+  <div class="card">
+    <label>Decision</label><textarea id="dtext" placeholder="Take the new job at Acme"></textarea>
+    <label style="margin-top:10px">What do you predict will happen?</label><textarea id="dpred" placeholder="I'll be measurably happier at the 3-month mark"></textarea>
+    <div class="row">
+      <div><label>Confidence (%)</label><input id="dconf" type="number" min="50" max="99" value="70"></div>
+      <div><label>Review date</label><input id="drev" type="date"></div>
+    </div>
+    <div style="margin-top:12px"><button id="add">Log decision</button></div>
+    <div class="err" id="err"></div>
+  </div>
+
+  <div id="duecard"></div>
+  <div id="pendcard"></div>
+  <div id="calcard"></div>
+  <div id="histcard"></div>
+</div>
+<script src="engine.js"></script>
+<script>
+(function(){
+  const $ = id => document.getElementById(id);
+  const todayNum = DecisionEngine.parseDay(new Date().toISOString().slice(0,10));
+  const todayStr = DecisionEngine.fmtDay(todayNum);
+  $('drev').value = DecisionEngine.fmtDay(todayNum + 90);
+
+  let decisions = [];
+  try { decisions = JSON.parse(localStorage.getItem('decisionlog-items') || '[]'); } catch(e) {}
+  function save(){ localStorage.setItem('decisionlog-items', JSON.stringify(decisions)); }
+  function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+  $('add').onclick = () => {
+    $('err').textContent = '';
+    try {
+      const d = DecisionEngine.normDecision({ text:$('dtext').value, prediction:$('dpred').value, confidence:$('dconf').value, reviewDate:$('drev').value, created: todayStr });
+      decisions.push(d); save(); render();
+      $('dtext').value = ''; $('dpred').value = '';
+    } catch(e) { $('err').textContent = e.message; }
+  };
+
+  function decBlock(d, i, extra) {
+    return '<div class="dec"><div class="txt">' + esc(d.text) + '</div>'
+      + '<div class="meta">predicted: ' + esc(d.prediction) + ' - <span class="conf">' + d.confidence + '%</span> - review ' + d.reviewDate + extra + '</div>'
+      + '<div class="actions" data-i="' + i + '">'
+      + '<button class="ghost" data-right="' + i + '">called it right</button>'
+      + '<button class="ghost" data-wrong="' + i + '">got it wrong</button>'
+      + '<a class="rm" href="#" data-rm="' + i + '">delete</a></div></div>';
+  }
+
+  function render(){
+    const due = DecisionEngine.dueForReview(decisions, todayNum);
+    const pend = DecisionEngine.pending(decisions, todayNum);
+    const hist = decisions.map((d, i) => ({d:d, i:i})).filter(x => x.d.outcome);
+    const cal = DecisionEngine.calibration(decisions);
+
+    $('duecard').innerHTML = due.length ? '<div class="card"><h3>Due for review (' + due.length + ')</h3>'
+      + due.map(x => decBlock(x.decision, decisions.indexOf(x.decision), ' - <span style="color:#ff8a8a">' + (x.daysOverdue ? x.daysOverdue + 'd overdue' : 'due today') + '</span>')).join('') + '</div>' : '';
+
+    $('pendcard').innerHTML = pend.length ? '<div class="card"><h3>Still cooking (' + pend.length + ')</h3>'
+      + pend.map(x => {
+          const d = x.decision;
+          return '<div class="dec"><div class="txt">' + esc(d.text) + '</div><div class="meta">predicted: ' + esc(d.prediction) + ' - <span class="conf">' + d.confidence + '%</span> - review in ' + x.daysLeft + 'd (' + d.reviewDate + ')</div></div>';
+        }).join('') + '</div>' : '';
+
+    if (cal.resolved) {
+      let html = '<div class="card"><h3>Calibration (' + cal.resolved + ' graded)</h3><div class="stats">'
+        + '<div class="stat"><b>' + Math.round(cal.overallAccuracy * 100) + '%</b><span>accuracy</span></div>'
+        + '<div class="stat"><b>' + cal.brier.toFixed(3) + '</b><span>Brier score (lower is better)</span></div>'
+        + '<div class="stat"><b>' + (cal.overconfidenceGap >= 0 ? '+' : '') + Math.round(cal.overconfidenceGap * 100) + ' pts</b><span>' + (cal.overconfidenceGap >= 0 ? 'overconfident' : 'underconfident') + '</span></div>'
+        + '</div><div style="margin-top:14px">';
+      cal.buckets.forEach(b => {
+        const accW = Math.round(b.accuracy * 100);
+        const confPos = Math.round((b.avgConfidence - 50) / 50 * 100);
+        html += '<div class="brow"><span class="range">' + b.lo + '-' + b.hi + '%</span>'
+          + '<span class="barwrap"><span class="bar" style="width:' + accW + '%"></span><span class="mark" style="left:' + confPos + '%"></span></span>'
+          + '<span class="nums">' + accW + '% right (n=' + b.n + ')</span></div>';
+      });
+      html += '</div><div class="meta" style="color:#9a8fb8;font-size:12px;margin-top:8px">Bar = actual accuracy, tick = average confidence in that bucket. Tick right of the bar means overconfident.</div></div>';
+      $('calcard').innerHTML = html;
+    } else { $('calcard').innerHTML = ''; }
+
+    $('histcard').innerHTML = hist.length ? '<div class="card"><h3>Graded</h3>'
+      + hist.reverse().map(x =>
+        '<div class="dec"><div class="txt">' + esc(x.d.text) + ' <span class="' + (x.d.outcome === 'right' ? 'tag-r' : 'tag-w') + '">' + (x.d.outcome === 'right' ? 'right' : 'wrong') + '</span></div>'
+        + '<div class="meta">predicted: ' + esc(x.d.prediction) + ' - <span class="conf">' + x.d.confidence + '%</span></div></div>'
+      ).join('') + '</div>' : '';
+
+    document.querySelectorAll('[data-right]').forEach(el => el.onclick = () => { decisions[+el.dataset.right] = DecisionEngine.resolve(decisions[+el.dataset.right], true); save(); render(); });
+    document.querySelectorAll('[data-wrong]').forEach(el => el.onclick = () => { decisions[+el.dataset.wrong] = DecisionEngine.resolve(decisions[+el.dataset.wrong], false); save(); render(); });
+    document.querySelectorAll('[data-rm]').forEach(el => el.onclick = (ev) => { ev.preventDefault(); decisions.splice(+el.dataset.rm, 1); save(); render(); });
+  }
+
+  render();
+})();
+</script>
+</body>
+</html>
